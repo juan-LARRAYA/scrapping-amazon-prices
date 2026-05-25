@@ -33,7 +33,19 @@ export const scrapeProduct = async (itemId: string, _country = "AR"): Promise<Pr
   }
 
   const data = await response.json()
-  const html: string = data.results?.[0]?.content ?? ""
+  let html: string = data.results?.[0]?.content ?? ""
+
+  // HTML < 50KB indica página del challenge de Anubis en vez del producto — reintentamos
+  if (html.length < 50_000) {
+    const retry = await fetch("https://scraper-api.decodo.com/v2/scrape", {
+      method: "POST",
+      body: JSON.stringify({ target: "universal", url, parse: false, headless: "html" }),
+      headers: { "Content-Type": "application/json", Authorization: getDecodoAuth() },
+      signal: AbortSignal.timeout(150_000),
+    })
+    const retryData = await retry.json()
+    html = retryData.results?.[0]?.content ?? html
+  }
 
   let title: string | null = null
   let price: number | null = null
