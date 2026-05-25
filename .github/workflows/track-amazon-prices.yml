@@ -43,4 +43,5 @@ jobs:
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           AMAZON_ASINS_ES: ${{ secrets.AMAZON_ASINS_ES }}
           AMAZON_ASINS_US: ${{ secrets.AMAZON_ASINS_US }}
+          ML_ITEMS: ${{ secrets.ML_ITEMS }}
         run: pnpm track:proxy

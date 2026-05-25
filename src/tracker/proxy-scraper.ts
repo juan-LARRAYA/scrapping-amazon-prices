@@ -2,7 +2,8 @@ import { loadEnvFileIfPresent } from "./load-env.js"
 
 loadEnvFileIfPresent()
 
-import { scrapeProduct } from "./scraper.js"
+import { scrapeProduct } from "./scraper-amazon.js"
+import { scrapeProduct as scrapeProductML } from "./scraper-mercadolibre.js"
 import { initDb } from "../db/schema.js"
 import { saveSnapshot } from "../db/queries.js"
 
@@ -13,25 +14,23 @@ const main = async () => {
   await initDb()
 
   const stores = [
-    { domain: "es", asins: getAsins("AMAZON_ASINS_ES") },
-    { domain: "com", asins: getAsins("AMAZON_ASINS_US") },
+    { label: "amazon.es", domain: "es", asins: getAsins("AMAZON_ASINS_ES"), scraper: scrapeProduct, provider: "Decodo" },
+    { label: "amazon.com", domain: "com", asins: getAsins("AMAZON_ASINS_US"), scraper: scrapeProduct, provider: "Decodo" },
+    { label: "mercadolibre.com.ar", domain: "AR", asins: getAsins("ML_ITEMS"), scraper: scrapeProductML, provider: "MercadoLibre API" },
   ]
 
-  console.log("Scraping de Amazon usando Proxy + API (Decodo)")
-  console.log("Proveedor: Decodo Scraper API")
+  for (const store of stores) {
+    if (store.asins.length === 0) continue
 
-  for (const { domain, asins } of stores) {
-    if (asins.length === 0) continue
+    console.log(`\nTienda: ${store.label} — ${store.asins.length} item(s) vía ${store.provider}: ${store.asins.join(", ")}`)
 
-    console.log(`\nTienda: amazon.${domain} — ${asins.length} ASIN(s): ${asins.join(", ")}`)
-
-    for (const asin of asins) {
-      console.log(`\n→ [Proxy] Solicitando ${asin} (amazon.${domain}) vía Decodo...`)
+    for (const asin of store.asins) {
+      console.log(`\n→ Solicitando ${asin} (${store.label})...`)
 
       try {
-        const data = await scrapeProduct(asin, domain)
+        const data = await store.scraper(asin, store.domain)
 
-        console.log(`  [Proxy OK] ${data.asin}`)
+        console.log(`  [OK] ${data.asin}`)
         console.log(`  Título:   ${data.title ?? "no encontrado"}`)
         console.log(`  Precio:   ${data.price ?? "no encontrado"} ${data.currency ?? ""}`)
         console.log(`  Rating:   ${data.rating ?? "no encontrado"}`)
@@ -43,7 +42,7 @@ const main = async () => {
         await saveSnapshot(data)
         console.log(`  [DB] Snapshot guardado en la base de datos`)
       } catch (error) {
-        console.error(`  [Proxy ERROR] ${error instanceof Error ? error.message : error}`)
+        console.error(`  [ERROR] ${error instanceof Error ? error.message : error}`)
       }
     }
   }
