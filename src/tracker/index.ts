@@ -7,45 +7,40 @@ import { saveSnapshot } from "../db/queries.js"
 import { scrapeProduct } from "./scraper.js"
 
 
-const getAsins = (): string[] => {
-  const raw = process.env.AMAZON_ASINS ?? ""
-  const asins = raw
-    .split(",")
-    .map((s: string) => s.trim())
-    .filter(Boolean)
-
-  if (asins.length === 0) {
-    throw new Error("No hay ASINs configurados en AMAZON_ASINS")
-  }
-
-  return asins
-}
+const getAsins = (envVar: string): string[] =>
+  (process.env[envVar] ?? "").split(",").map((s: string) => s.trim()).filter(Boolean)
 
 const main = async () => {
   await initDb()
 
-  const asins = getAsins()
+  const stores = [
+    { domain: "es", asins: getAsins("AMAZON_ASINS_ES") },
+    { domain: "com", asins: getAsins("AMAZON_ASINS_US") },
+  ]
 
-  console.log(`Tracking ${asins.length} producto(s)...\n`)
+  const total = stores.reduce((n, s) => n + s.asins.length, 0)
+  console.log(`Tracking ${total} producto(s)...\n`)
 
-  for (const asin of asins) {
-    try {
-      const snapshot = await scrapeProduct(asin)
-      await saveSnapshot(snapshot)
+  for (const { domain, asins } of stores) {
+    for (const asin of asins) {
+      try {
+        const snapshot = await scrapeProduct(asin, domain)
+        await saveSnapshot(snapshot)
 
-      console.log({
-        asin: snapshot.asin,
-        title: snapshot.title,
-        price: snapshot.price,
-        currency: snapshot.currency,
-        availability: snapshot.availability,
-        scrapedAt: snapshot.scrapedAt,
-      })
-    } catch (error) {
-      console.error({
-        asin,
-        error: error instanceof Error ? error.message : "Error desconocido",
-      })
+        console.log({
+          asin: snapshot.asin,
+          title: snapshot.title,
+          price: snapshot.price,
+          currency: snapshot.currency,
+          availability: snapshot.availability,
+          scrapedAt: snapshot.scrapedAt,
+        })
+      } catch (error) {
+        console.error({
+          asin,
+          error: error instanceof Error ? error.message : "Error desconocido",
+        })
+      }
     }
   }
 }

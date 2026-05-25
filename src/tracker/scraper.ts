@@ -27,13 +27,13 @@ const getDecodoAuth = (): string => {
   return `Basic ${token}`
 }
 
-export const scrapeProduct = async (asin: string): Promise<ProductSnapshot> => {
+export const scrapeProduct = async (asin: string, domain = "es"): Promise<ProductSnapshot> => {
   const response = await fetch("https://scraper-api.decodo.com/v2/scrape", {
     method: "POST",
     body: JSON.stringify({
       "target": "amazon_product",
       "query": asin,
-      "domain": "es",
+      "domain": domain,
       "parse": true
     }),
     headers: {
