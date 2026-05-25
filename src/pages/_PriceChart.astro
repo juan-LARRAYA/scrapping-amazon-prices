@@ -1,0 +1,193 @@
+---
+import { fmtDate } from "./_data.js"
+import type { ChartData } from "./_data.js"
+
+type Props = ChartData
+const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
+---
+
+<section class="chart-box">
+  <div class="chart-head">
+    <h2>Evolucion de precios</h2>
+    <div class="legend">
+      {series.map((s) => (
+        <span class="legend-item">
+          <span class="dot" style={`background:${s.color}`} />
+          {s.asin}
+        </span>
+      ))}
+    </div>
+  </div>
+
+  <div class="chart" id="chart-container">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Grafico de precios">
+      {yTicks.map((v) => (
+        <g>
+          <line x1={PL} y1={y(v)} x2={W - PR} y2={y(v)} class="grid" />
+          <text x={PL - 8} y={y(v) + 4} class="label" text-anchor="end">{v.toFixed(0)} €</text>
+        </g>
+      ))}
+
+      {xTicks.map((t) => (
+        <text x={t.x} y={H - PB + 20} class="label" text-anchor="middle">{t.label}</text>
+      ))}
+
+      {series.map((s) => (
+        <path d={s.d} fill="none" stroke={s.color} stroke-width="2" stroke-linejoin="round" />
+      ))}
+
+      {series.map((s) =>
+        s.pts.map((pt) => (
+          <circle
+            cx={x(new Date(pt.scrapedAt).getTime())}
+            cy={y(pt.price)}
+            r="3"
+            fill={s.color}
+            class="point"
+            data-price={pt.price.toFixed(2)}
+            data-date={fmtDate(pt.scrapedAt)}
+            data-color={s.color}
+          />
+        ))
+      )}
+    </svg>
+    <div class="tooltip" id="chart-tooltip"></div>
+  </div>
+</section>
+
+<style>
+  .chart-box {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .chart-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .chart-box h2 {
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin: 0;
+    color: #a1a1aa;
+  }
+
+  .legend {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.7rem;
+    color: #71717a;
+    font-family: ui-monospace, monospace;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+  }
+
+  .chart {
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .grid {
+    stroke: #27272a;
+    stroke-width: 1;
+  }
+
+  .label {
+    fill: #3f3f46;
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+  }
+
+  .point {
+    cursor: pointer;
+    transition: r 120ms ease;
+  }
+
+  .point:hover {
+    r: 5;
+  }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: #fafafa;
+    color: #18181b;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 100ms ease;
+    transform: translate(-50%, -100%);
+    margin-top: -10px;
+    font-family: ui-monospace, monospace;
+  }
+
+  .tooltip.visible {
+    opacity: 1;
+  }
+
+  @media (max-width: 640px) {
+    .chart-head { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+
+<script>
+  const container = document.getElementById("chart-container")
+  const tooltip = document.getElementById("chart-tooltip")
+  if (container && tooltip) {
+    const svg = container.querySelector("svg")!
+    const points = container.querySelectorAll<SVGCircleElement>(".point")
+
+    points.forEach((point) => {
+      point.addEventListener("mouseenter", () => {
+        const price = point.dataset.price
+        const date = point.dataset.date
+        tooltip.textContent = `${price} € · ${date}`
+        tooltip.classList.add("visible")
+
+        const svgRect = svg.getBoundingClientRect()
+        const viewBox = svg.viewBox.baseVal
+        const cx = parseFloat(point.getAttribute("cx")!)
+        const cy = parseFloat(point.getAttribute("cy")!)
+
+        const px = (cx / viewBox.width) * svgRect.width
+        const py = (cy / viewBox.height) * svgRect.height
+
+        tooltip.style.left = `${px}px`
+        tooltip.style.top = `${py}px`
+      })
+
+      point.addEventListener("mouseleave", () => {
+        tooltip.classList.remove("visible")
+      })
+    })
+  }
+</script>
