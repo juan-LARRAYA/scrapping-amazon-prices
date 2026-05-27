@@ -1,0 +1,273 @@
+---
+import { fmt, fmtDate } from "./_data.js"
+import type { ChartSeries } from "./_data.js"
+
+interface Props {
+  series: ChartSeries[]
+}
+
+const { series } = Astro.props
+
+// Deduplicate by 5-minute slot: keeps last scraped value per slot.
+// Without dedup, setData() throws on duplicate timestamps and the whole
+// script crashes after the first series (showing only 1 line).
+const chartJson = JSON.stringify(
+  series.map((s) => ({
+    asin: s.asin,
+    color: s.color,
+    pts: (() => {
+      const bySlot = new Map<number, { time: number; value: number; label: string; dateLabel: string }>()
+      for (const pt of s.pts) {
+        const rounded = Math.round(new Date(pt.scrapedAt).getTime() / 300_000) * 300
+        bySlot.set(rounded, {
+          time: rounded,
+          value: pt.price,
+          label: fmt(pt.price, pt.currency),
+          dateLabel: fmtDate(pt.scrapedAt),
+        })
+      }
+      return [...bySlot.values()]
+    })(),
+  }))
+)
+---
+
+<section class="chart-box">
+  <div class="chart-head">
+    <h2>Evolucion de precios</h2>
+    <div class="legend">
+      {series.map((s) => (
+        <span class="legend-item">
+          <span class="dot" style={`background:${s.color}`} />
+          <span>{s.asin}</span>
+        </span>
+      ))}
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <div id="lw-chart" data-series={chartJson}></div>
+    <div id="lw-tooltip" class="lw-tooltip"></div>
+  </div>
+</section>
+
+<style>
+  .chart-box {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 1rem 1rem 1rem 1.5rem;
+  }
+
+  .chart-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    gap: 0.75rem;
+  }
+
+  .chart-box h2 {
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin: 0;
+    color: #a1a1aa;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    justify-content: flex-end;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.7rem;
+    color: #71717a;
+    font-family: ui-monospace, monospace;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .chart-wrap {
+    position: relative;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  #lw-chart {
+    width: 100%;
+    height: 300px;
+  }
+
+  .lw-tooltip {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: #fafafa;
+    color: #18181b;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-family: ui-monospace, monospace;
+    line-height: 1.6;
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+
+  .lw-tooltip .tt-date {
+    color: #52525b;
+    margin-bottom: 0.15rem;
+  }
+
+  @media (max-width: 640px) {
+    .chart-box { padding-left: 1rem; }
+    .chart-head { flex-direction: column; }
+    .legend { justify-content: flex-start; }
+  }
+</style>
+
+<!-- :global() escapes Astro's CSS scoping so this matches the <a>
+     injected dynamically by lightweight-charts into #lw-chart -->
+<style is:global>
+  #lw-chart a { display: none !important; }
+</style>
+
+<script>
+  import { createChart, CrosshairMode, LineSeries, type UTCTimestamp } from "lightweight-charts"
+
+  const el = document.getElementById("lw-chart")
+  const tooltip = document.getElementById("lw-tooltip")
+  if (!el || !tooltip) throw new Error("Chart elements not found")
+
+  const rawData = JSON.parse(el.dataset.series ?? "[]") as Array<{
+    asin: string
+    color: string
+    pts: Array<{ time: number; value: number; label: string; dateLabel: string }>
+  }>
+
+  const chart = createChart(el, {
+    autoSize: true,
+    height: 300,
+    layout: {
+      background: { color: "#18181b" },
+      textColor: "#71717a",
+    },
+    grid: {
+      vertLines: { color: "#27272a" },
+      horzLines: { color: "#27272a" },
+    },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      borderColor: "#3f3f46",
+      rightOffset: 2,
+    },
+    rightPriceScale: { borderColor: "#3f3f46" },
+    crosshair: {
+      mode: CrosshairMode.Magnet,
+      vertLine: { labelVisible: false },
+      horzLine: { labelVisible: false },
+    },
+    // Wheel scrolls horizontally, drag scrolls horizontally — no vertical movement
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
+    handleScale: {
+      mouseWheel: false,  // wheel scrolls, not zooms
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: true },
+    },
+    kineticScroll: { mouse: true, touch: true },
+  })
+
+  const lineSeriesMap = rawData.map((s) => {
+    const api = chart.addSeries(LineSeries, {
+      color: s.color,
+      lineWidth: 2,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      crosshairMarkerRadius: 6,
+      crosshairMarkerBorderColor: "#18181b",
+      crosshairMarkerBorderWidth: 2,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    })
+    api.setData(s.pts.map(({ time, value }) => ({ time: time as UTCTimestamp, value })))
+    return { api, meta: s }
+  })
+
+  // Ctrl + wheel zooms the time axis; regular wheel scrolls (handled by the chart)
+  el.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return
+    e.preventDefault()
+    const ts = chart.timeScale()
+    const range = ts.getVisibleLogicalRange()
+    if (!range) return
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+    const center = (range.from + range.to) / 2
+    const half = ((range.to - range.from) / 2) * factor
+    ts.setVisibleLogicalRange({ from: center - half, to: center + half })
+  }, { passive: false })
+
+  // Tooltip appears only when cursor is within HIT_RADIUS px of a marker.
+  // param.point is raw cursor; xCoord/yCoord are the snapped data-point pixels.
+  const HIT_RADIUS = 12
+
+  chart.subscribeCrosshairMove((param) => {
+    const point = param.point
+    if (param.time === undefined || !point || point.x < 0 || point.y < 0) {
+      tooltip.style.display = "none"
+      return
+    }
+
+    const ts = Number(param.time) as UTCTimestamp
+    const xCoord = chart.timeScale().timeToCoordinate(ts)
+    if (xCoord === null) { tooltip.style.display = "none"; return }
+
+    let html = ""
+
+    for (const { api, meta } of lineSeriesMap) {
+      const val = param.seriesData.get(api)
+      if (!val || !("value" in val)) continue
+
+      const yCoord = api.priceToCoordinate(val.value)
+      if (yCoord === null) continue
+
+      if (Math.hypot(point.x - xCoord, point.y - yCoord) > HIT_RADIUS) continue
+
+      const pt = meta.pts.find((p) => p.time === ts)
+      if (!pt) continue
+
+      if (!html) html = `<div class="tt-date">${pt.dateLabel}</div>`
+      html += `<div><span style="color:${meta.color}">●</span> ${meta.asin}: ${pt.label}</div>`
+    }
+
+    if (!html) { tooltip.style.display = "none"; return }
+
+    tooltip.innerHTML = html
+    tooltip.style.display = "block"
+
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(point.x + 14, rect.width - tooltip.offsetWidth - 4)
+    const y = Math.max(4, point.y - tooltip.offsetHeight - 4)
+    tooltip.style.left = `${x}px`
+    tooltip.style.top = `${y}px`
+  })
+</script>
