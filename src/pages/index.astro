@@ -1,8 +1,8 @@
 ---
 import Layout from "../layouts/Layout.astro"
 import type { PriceRow } from "../db/queries.js"
-import { buildProducts, buildChartData } from "./_data.js"
-import type { ProductSummary } from "./_data.js"
+import { buildProducts, buildChartData, STORE_LABELS } from "./_data.js"
+import type { ProductSummary, Store } from "./_data.js"
 import ProductCard from "./_ProductCard.astro"
 import PriceChart from "./_PriceChart.astro"
 
@@ -23,6 +23,11 @@ try {
 
 const chart = buildChartData(allPoints, products)
 const uniqueDays = [...new Set(allPoints.map((p) => p.scrapedAt.slice(0, 10)))]
+
+const STORE_ORDER: Store[] = ["amazon-es", "amazon-us", "mercadolibre", "unknown"]
+const productsByStore = STORE_ORDER
+  .map((store) => ({ store, items: products.filter((p) => p.store === store) }))
+  .filter(({ items }) => items.length > 0)
 ---
 
 <Layout>
@@ -40,12 +45,20 @@ const uniqueDays = [...new Set(allPoints.map((p) => p.scrapedAt.slice(0, 10)))]
       <div class="notice">{chartError}</div>
     ) : (
       <>
-        <section class="cards">
-          {products.map((p) => (
-            <ProductCard product={p} color={chart.colorMap.get(p.asin)!} />
-          ))}
-        </section>
-        <PriceChart {...chart} />
+        {productsByStore.map(({ store, items }) => (
+          <details class="store-section" open>
+            <summary class="store-label">
+              {STORE_LABELS[store]}
+              <span class="count">{items.length}</span>
+            </summary>
+            <div class="cards">
+              {items.map((p) => (
+                <ProductCard product={p} color={chart.colorMap.get(p.asin)!} />
+              ))}
+            </div>
+          </details>
+        ))}
+        <PriceChart series={chart.series} />
       </>
     )}
   </main>
@@ -79,11 +92,58 @@ const uniqueDays = [...new Set(allPoints.map((p) => p.scrapedAt.slice(0, 10)))]
     color: #71717a;
   }
 
+  /* Collapsible store sections */
+  .store-section {
+    margin-bottom: 1.25rem;
+  }
+
+  .store-label {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #52525b;
+    margin-bottom: 0.6rem;
+    cursor: pointer;
+    user-select: none;
+    width: fit-content;
+  }
+
+  .store-label::-webkit-details-marker { display: none; }
+
+  .store-label::before {
+    content: "▾";
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: transform 150ms ease;
+    color: #71717a;
+  }
+
+  .store-section:not([open]) .store-label::before {
+    transform: rotate(-90deg);
+  }
+
+  .count {
+    background: #27272a;
+    color: #71717a;
+    font-size: 0.6rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 999px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
   .cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 0.75rem;
-    margin-bottom: 1.5rem;
+    padding-bottom: 0.25rem;
   }
 
   .notice {

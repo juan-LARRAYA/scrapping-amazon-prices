@@ -27,7 +27,7 @@ const d = delta(p.latestPrice, p.previousPrice)
   )}
 
   <div class="price-line">
-    <span class="price">{p.latestPrice != null ? fmt(p.latestPrice) : "—"}</span>
+    <span class="price">{p.latestPrice != null ? fmt(p.latestPrice, p.currency) : "—"}</span>
     {d != null && (
       <span class={`delta ${d > 0 ? "up" : d < 0 ? "down" : ""}`}>
         {d > 0 ? "+" : ""}{d.toFixed(1)}%
@@ -36,9 +36,9 @@ const d = delta(p.latestPrice, p.previousPrice)
   </div>
 
   <div class="range">
-    <span>{fmt(p.minPrice)}</span>
+    <span>{fmt(p.minPrice, p.currency)}</span>
     <span class="range-bar"><span class="range-fill" style={`background:${color}`} /></span>
-    <span>{fmt(p.maxPrice)}</span>
+    <span>{fmt(p.maxPrice, p.currency)}</span>
   </div>
 </article>
 

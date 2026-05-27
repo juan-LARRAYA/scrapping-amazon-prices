@@ -1,5 +1,24 @@
 import type { PriceRow } from "../db/queries.js"
 
+export type Store = "amazon-es" | "amazon-us" | "mercadolibre" | "unknown"
+
+export const STORE_LABELS: Record<Store, string> = {
+  "amazon-es": "Amazon España",
+  "amazon-us": "Amazon US",
+  "mercadolibre": "MercadoLibre",
+  "unknown": "Otros",
+}
+
+function detectStore(currency: string | null, url: string | null): Store {
+  if (currency === "EUR") return "amazon-es"
+  if (currency === "USD") return "amazon-us"
+  if (currency === "ARS") return "mercadolibre"
+  if (url?.includes("amazon.es")) return "amazon-es"
+  if (url?.includes("amazon.com")) return "amazon-us"
+  if (url?.includes("mercadolibre")) return "mercadolibre"
+  return "unknown"
+}
+
 export type ProductSummary = {
   asin: string
   title: string | null
@@ -13,34 +32,34 @@ export type ProductSummary = {
   rating: number | null
   snapshots: number
   lastSeen: string
+  store: Store
 }
 
 export type ChartSeries = {
   asin: string
   pts: PriceRow[]
-  d: string
   color: string
 }
 
 export type ChartData = {
-  colorMap: Map<string, string>
   series: ChartSeries[]
-  yTicks: number[]
-  xTicks: { x: number; label: string }[]
-  W: number
-  H: number
-  PL: number
-  PR: number
-  PT: number
-  PB: number
-  x: (ts: number) => number
-  y: (price: number) => number
+  colorMap: Map<string, string>
 }
 
-export const fmt = (n: number): string => `${n.toFixed(2)} €`
+export const fmt = (n: number, currency: string | null): string => {
+  if (currency === "EUR") return `${n.toFixed(2)} €`
+  if (currency === "USD") return `$${n.toFixed(2)}`
+  if (currency === "ARS") return `$ ${Math.round(n).toLocaleString("es-AR")}`
+  return n.toFixed(2)
+}
 
 export const fmtDate = (s: string): string =>
-  new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
+  new Date(s).toLocaleString("es-ES", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 
 export const delta = (a: number | null, b: number | null): number | null =>
   a != null && b != null && b !== 0 ? ((a - b) / b) * 100 : null
@@ -71,6 +90,7 @@ export function buildProducts(allPoints: PriceRow[]): ProductSummary[] {
       rating: latest.rating,
       snapshots: points.length,
       lastSeen: latest.scrapedAt,
+      store: detectStore(latest.currency, latest.url),
     }
   })
 }
@@ -87,43 +107,11 @@ export function buildChartData(allPoints: PriceRow[], products: ProductSummary[]
     groupedByAsin.set(point.asin, list)
   }
 
-  const allPrices = allPoints.map((p) => p.price)
-  const minPrice = allPrices.length > 0 ? Math.min(...allPrices) : 0
-  const maxPrice = allPrices.length > 0 ? Math.max(...allPrices) : 0
-  const margin = (maxPrice - minPrice) * 0.1 || 1
-  const yMin = minPrice - margin
-  const yMax = maxPrice + margin
+  const series: ChartSeries[] = trackedAsins.map((asin) => ({
+    asin,
+    pts: groupedByAsin.get(asin) ?? [],
+    color: colorMap.get(asin)!,
+  }))
 
-  const allDates = allPoints.map((p) => new Date(p.scrapedAt).getTime())
-  const minDate = allDates.length > 0 ? Math.min(...allDates) : 0
-  const maxDate = allDates.length > 0 ? Math.max(...allDates) : 0
-
-  const W = 900, H = 340, PL = 58, PR = 16, PT = 16, PB = 44
-  const PW = W - PL - PR
-  const PH = H - PT - PB
-
-  const x = (ts: number) =>
-    maxDate === minDate ? PL + PW / 2 : PL + ((ts - minDate) / (maxDate - minDate)) * PW
-  const y = (p: number) =>
-    yMax === yMin ? PT + PH / 2 : PT + ((yMax - p) / (yMax - yMin)) * PH
-
-  const yTicks = Array.from({ length: 5 }, (_, i) => yMax - (i / 4) * (yMax - yMin))
-
-  const uniqueDays = [...new Set(allPoints.map((p) => p.scrapedAt.slice(0, 10)))]
-  const xTickCount = Math.min(6, uniqueDays.length)
-  const xStep = allDates.length > 1 ? (maxDate - minDate) / Math.max(xTickCount - 1, 1) : 0
-  const xTicks = Array.from({ length: xTickCount }, (_, i) => {
-    const ts = minDate + i * xStep
-    return { x: x(ts), label: new Date(ts).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) }
-  })
-
-  const series: ChartSeries[] = trackedAsins.map((asin) => {
-    const pts = groupedByAsin.get(asin) ?? []
-    const d = pts
-      .map((p, i) => `${i === 0 ? "M" : "L"}${x(new Date(p.scrapedAt).getTime()).toFixed(1)} ${y(p.price).toFixed(1)}`)
-      .join(" ")
-    return { asin, pts, d, color: colorMap.get(asin)! }
-  })
-
-  return { colorMap, series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y }
+  return { series, colorMap }
 }

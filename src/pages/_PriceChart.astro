@@ -1,9 +1,35 @@
 ---
-import { fmtDate } from "./_data.js"
-import type { ChartData } from "./_data.js"
+import { fmt, fmtDate } from "./_data.js"
+import type { ChartSeries } from "./_data.js"
 
-type Props = ChartData
-const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
+interface Props {
+  series: ChartSeries[]
+}
+
+const { series } = Astro.props
+
+// Deduplicate by 5-minute slot: keeps last scraped value per slot.
+// Without dedup, setData() throws on duplicate timestamps and the whole
+// script crashes after the first series (showing only 1 line).
+const chartJson = JSON.stringify(
+  series.map((s) => ({
+    asin: s.asin,
+    color: s.color,
+    pts: (() => {
+      const bySlot = new Map<number, { time: number; value: number; label: string; dateLabel: string }>()
+      for (const pt of s.pts) {
+        const rounded = Math.round(new Date(pt.scrapedAt).getTime() / 300_000) * 300
+        bySlot.set(rounded, {
+          time: rounded,
+          value: pt.price,
+          label: fmt(pt.price, pt.currency),
+          dateLabel: fmtDate(pt.scrapedAt),
+        })
+      }
+      return [...bySlot.values()]
+    })(),
+  }))
+)
 ---
 
 <section class="chart-box">
@@ -13,45 +39,15 @@ const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
       {series.map((s) => (
         <span class="legend-item">
           <span class="dot" style={`background:${s.color}`} />
-          {s.asin}
+          <span>{s.asin}</span>
         </span>
       ))}
     </div>
   </div>
 
-  <div class="chart" id="chart-container">
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Grafico de precios">
-      {yTicks.map((v) => (
-        <g>
-          <line x1={PL} y1={y(v)} x2={W - PR} y2={y(v)} class="grid" />
-          <text x={PL - 8} y={y(v) + 4} class="label" text-anchor="end">{v.toFixed(0)} €</text>
-        </g>
-      ))}
-
-      {xTicks.map((t) => (
-        <text x={t.x} y={H - PB + 20} class="label" text-anchor="middle">{t.label}</text>
-      ))}
-
-      {series.map((s) => (
-        <path d={s.d} fill="none" stroke={s.color} stroke-width="2" stroke-linejoin="round" />
-      ))}
-
-      {series.map((s) =>
-        s.pts.map((pt) => (
-          <circle
-            cx={x(new Date(pt.scrapedAt).getTime())}
-            cy={y(pt.price)}
-            r="3"
-            fill={s.color}
-            class="point"
-            data-price={pt.price.toFixed(2)}
-            data-date={fmtDate(pt.scrapedAt)}
-            data-color={s.color}
-          />
-        ))
-      )}
-    </svg>
-    <div class="tooltip" id="chart-tooltip"></div>
+  <div class="chart-wrap">
+    <div id="lw-chart" data-series={chartJson}></div>
+    <div id="lw-tooltip" class="lw-tooltip"></div>
   </div>
 </section>
 
@@ -60,16 +56,15 @@ const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
     background: #18181b;
     border: 1px solid #27272a;
     border-radius: 10px;
-    padding: 1rem;
+    padding: 1rem 1rem 1rem 1.5rem;
   }
 
   .chart-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.75rem;
   }
 
   .chart-box h2 {
@@ -77,11 +72,15 @@ const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
     font-weight: 500;
     margin: 0;
     color: #a1a1aa;
+    flex-shrink: 0;
+    padding-top: 2px;
   }
 
   .legend {
     display: flex;
-    gap: 1rem;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    justify-content: flex-end;
   }
 
   .legend-item {
@@ -98,96 +97,177 @@ const { series, yTicks, xTicks, W, H, PL, PR, PT, PB, x, y } = Astro.props
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
-    display: inline-block;
   }
 
-  .chart {
+  .chart-wrap {
+    position: relative;
     border-radius: 6px;
     overflow: hidden;
-    position: relative;
   }
 
-  svg {
+  #lw-chart {
     width: 100%;
-    height: auto;
-    display: block;
+    height: 300px;
   }
 
-  .grid {
-    stroke: #27272a;
-    stroke-width: 1;
-  }
-
-  .label {
-    fill: #3f3f46;
-    font-size: 10px;
-    font-family: ui-monospace, monospace;
-  }
-
-  .point {
-    cursor: pointer;
-    transition: r 120ms ease;
-  }
-
-  .point:hover {
-    r: 5;
-  }
-
-  .tooltip {
+  .lw-tooltip {
+    display: none;
     position: absolute;
-    pointer-events: none;
+    top: 0;
+    left: 0;
     background: #fafafa;
     color: #18181b;
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 0.3rem 0.5rem;
+    padding: 0.35rem 0.6rem;
     border-radius: 6px;
-    white-space: nowrap;
-    opacity: 0;
-    transition: opacity 100ms ease;
-    transform: translate(-50%, -100%);
-    margin-top: -10px;
+    font-size: 0.7rem;
     font-family: ui-monospace, monospace;
+    line-height: 1.6;
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   }
 
-  .tooltip.visible {
-    opacity: 1;
+  .lw-tooltip .tt-date {
+    color: #52525b;
+    margin-bottom: 0.15rem;
   }
 
   @media (max-width: 640px) {
-    .chart-head { flex-direction: column; align-items: flex-start; }
+    .chart-box { padding-left: 1rem; }
+    .chart-head { flex-direction: column; }
+    .legend { justify-content: flex-start; }
   }
 </style>
 
+<!-- :global() escapes Astro's CSS scoping so this matches the <a>
+     injected dynamically by lightweight-charts into #lw-chart -->
+<style is:global>
+  #lw-chart a { display: none !important; }
+</style>
+
 <script>
-  const container = document.getElementById("chart-container")
-  const tooltip = document.getElementById("chart-tooltip")
-  if (container && tooltip) {
-    const svg = container.querySelector("svg")!
-    const points = container.querySelectorAll<SVGCircleElement>(".point")
+  import { createChart, CrosshairMode, LineSeries, type UTCTimestamp } from "lightweight-charts"
 
-    points.forEach((point) => {
-      point.addEventListener("mouseenter", () => {
-        const price = point.dataset.price
-        const date = point.dataset.date
-        tooltip.textContent = `${price} € · ${date}`
-        tooltip.classList.add("visible")
+  const el = document.getElementById("lw-chart")
+  const tooltip = document.getElementById("lw-tooltip")
+  if (!el || !tooltip) throw new Error("Chart elements not found")
 
-        const svgRect = svg.getBoundingClientRect()
-        const viewBox = svg.viewBox.baseVal
-        const cx = parseFloat(point.getAttribute("cx")!)
-        const cy = parseFloat(point.getAttribute("cy")!)
+  const rawData = JSON.parse(el.dataset.series ?? "[]") as Array<{
+    asin: string
+    color: string
+    pts: Array<{ time: number; value: number; label: string; dateLabel: string }>
+  }>
 
-        const px = (cx / viewBox.width) * svgRect.width
-        const py = (cy / viewBox.height) * svgRect.height
+  const chart = createChart(el, {
+    autoSize: true,
+    height: 300,
+    layout: {
+      background: { color: "#18181b" },
+      textColor: "#71717a",
+    },
+    grid: {
+      vertLines: { color: "#27272a" },
+      horzLines: { color: "#27272a" },
+    },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      borderColor: "#3f3f46",
+      rightOffset: 2,
+    },
+    rightPriceScale: { borderColor: "#3f3f46" },
+    crosshair: {
+      mode: CrosshairMode.Magnet,
+      vertLine: { labelVisible: false },
+      horzLine: { labelVisible: false },
+    },
+    // Wheel scrolls horizontally, drag scrolls horizontally — no vertical movement
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
+    handleScale: {
+      mouseWheel: false,  // wheel scrolls, not zooms
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: true },
+    },
+    kineticScroll: { mouse: true, touch: true },
+  })
 
-        tooltip.style.left = `${px}px`
-        tooltip.style.top = `${py}px`
-      })
-
-      point.addEventListener("mouseleave", () => {
-        tooltip.classList.remove("visible")
-      })
+  const lineSeriesMap = rawData.map((s) => {
+    const api = chart.addSeries(LineSeries, {
+      color: s.color,
+      lineWidth: 2,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      crosshairMarkerRadius: 6,
+      crosshairMarkerBorderColor: "#18181b",
+      crosshairMarkerBorderWidth: 2,
+      lastValueVisible: false,
+      priceLineVisible: false,
     })
-  }
+    api.setData(s.pts.map(({ time, value }) => ({ time: time as UTCTimestamp, value })))
+    return { api, meta: s }
+  })
+
+  // Ctrl + wheel zooms the time axis; regular wheel scrolls (handled by the chart)
+  el.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return
+    e.preventDefault()
+    const ts = chart.timeScale()
+    const range = ts.getVisibleLogicalRange()
+    if (!range) return
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+    const center = (range.from + range.to) / 2
+    const half = ((range.to - range.from) / 2) * factor
+    ts.setVisibleLogicalRange({ from: center - half, to: center + half })
+  }, { passive: false })
+
+  // Tooltip appears only when cursor is within HIT_RADIUS px of a marker.
+  // param.point is raw cursor; xCoord/yCoord are the snapped data-point pixels.
+  const HIT_RADIUS = 12
+
+  chart.subscribeCrosshairMove((param) => {
+    const point = param.point
+    if (param.time === undefined || !point || point.x < 0 || point.y < 0) {
+      tooltip.style.display = "none"
+      return
+    }
+
+    const ts = Number(param.time) as UTCTimestamp
+    const xCoord = chart.timeScale().timeToCoordinate(ts)
+    if (xCoord === null) { tooltip.style.display = "none"; return }
+
+    let html = ""
+
+    for (const { api, meta } of lineSeriesMap) {
+      const val = param.seriesData.get(api)
+      if (!val || !("value" in val)) continue
+
+      const yCoord = api.priceToCoordinate(val.value)
+      if (yCoord === null) continue
+
+      if (Math.hypot(point.x - xCoord, point.y - yCoord) > HIT_RADIUS) continue
+
+      const pt = meta.pts.find((p) => p.time === ts)
+      if (!pt) continue
+
+      if (!html) html = `<div class="tt-date">${pt.dateLabel}</div>`
+      html += `<div><span style="color:${meta.color}">●</span> ${meta.asin}: ${pt.label}</div>`
+    }
+
+    if (!html) { tooltip.style.display = "none"; return }
+
+    tooltip.innerHTML = html
+    tooltip.style.display = "block"
+
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(point.x + 14, rect.width - tooltip.offsetWidth - 4)
+    const y = Math.max(4, point.y - tooltip.offsetHeight - 4)
+    tooltip.style.left = `${x}px`
+    tooltip.style.top = `${y}px`
+  })
 </script>
